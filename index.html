@@ -1,0 +1,166 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ethereum Block Lottery</title>
+  <style>
+    body {
+      background-color: #0d0d0d;
+      color: #dddddd;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      padding: 20px;
+      margin: 0;
+    }
+    h2 {
+      color: #00ffff;
+      text-align: center;
+      text-shadow: 0 0 10px #00ffff;
+    }
+    .container {
+      max-width: 480px;
+      margin: auto;
+    }
+    label {
+      display: block;
+      margin-top: 20px;
+      font-size: 16px;
+    }
+    select, input, button {
+      width: 100%;
+      margin-top: 8px;
+      padding: 12px;
+      border-radius: 5px;
+      border: 1px solid #555555;
+      background-color: #1a1a1a;
+      color: #dddddd;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+    button {
+      background-color: #0044ff;
+      color: #ffffff;
+      font-weight: bold;
+      border: none;
+      cursor: pointer;
+      margin-top: 20px;
+      box-shadow: 0 0 10px #0044ff;
+      transition: background-color 0.3s, transform 0.2s;
+    }
+    button:hover {
+      background-color: #0066ff;
+      transform: scale(1.02);
+    }
+    .result {
+      margin-top: 30px;
+      padding: 15px;
+      background-color: #222222;
+      border-radius: 5px;
+      border: 1px solid #444444;
+      white-space: pre-wrap;
+      text-shadow: 0 0 5px #00ffff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Ethereum Block Lottery</h2>
+
+    <label>Select draw time:</label>
+    <select id="year"></select>
+    <select id="month"></select>
+    <select id="day"></select>
+    <select id="hour"></select>
+    <select id="minute"></select>
+
+    <label>Number of participants:</label>
+    <input type="number" id="participants" min="1" value="10" />
+
+    <label>Number of winners:</label>
+    <input type="number" id="winners" min="1" value="1" />
+
+    <button onclick="draw()">Draw Now</button>
+
+    <div class="result" id="result">Waiting for input...</div>
+  </div>
+
+  <script>
+    const apiKey = '1E98RSHP7K7B1WK3EDMQFEWN1VC7N3VKK9';
+
+    const now = new Date();
+    for (let y = 2023; y <= now.getFullYear() + 1; y++) {
+      year.innerHTML += `<option value="${y}" ${y === now.getFullYear() ? 'selected' : ''}>${y}</option>`;
+    }
+    for (let m = 1; m <= 12; m++) {
+      month.innerHTML += `<option value="${m}" ${m === now.getMonth() + 1 ? 'selected' : ''}>${m}</option>`;
+    }
+    for (let d = 1; d <= 31; d++) {
+      day.innerHTML += `<option value="${d}" ${d === now.getDate() ? 'selected' : ''}>${d}</option>`;
+    }
+    for (let h = 0; h < 24; h++) {
+      hour.innerHTML += `<option value="${h}" ${h === now.getHours() ? 'selected' : ''}>${h.toString().padStart(2, '0')}</option>`;
+    }
+    for (let mi = 0; mi < 60; mi++) {
+      minute.innerHTML += `<option value="${mi}" ${mi === now.getMinutes() ? 'selected' : ''}>${mi.toString().padStart(2, '0')}</option>`;
+    }
+
+    async function draw() {
+      const y = +year.value, m = +month.value - 1, d = +day.value, h = +hour.value, mi = +minute.value;
+      const drawTime = new Date(y, m, d, h, mi, 0);
+      const timestamp = Math.floor(drawTime.getTime() / 1000);
+      const nowTs = Math.floor(Date.now() / 1000);
+      const participants = parseInt(document.getElementById('participants').value);
+      const winners = parseInt(document.getElementById('winners').value);
+      const resultDiv = document.getElementById('result');
+
+      if (timestamp > nowTs) {
+        resultDiv.innerText = 'Waiting for the draw time...';
+        return;
+      }
+
+      try {
+        resultDiv.innerText = 'Fetching block number...';
+        const res1 = await fetch(`https://api.etherscan.io/api?module=block&action=getblocknobytime&timestamp=${timestamp}&closest=before&apikey=${apiKey}`);
+        const data1 = await res1.json();
+        const blockNumber = parseInt(data1.result);
+
+        const hexBlock = '0x' + blockNumber.toString(16);
+        resultDiv.innerText = 'Fetching block hash...';
+        const res2 = await fetch(`https://api.etherscan.io/api?module=proxy&action=eth_getBlockByNumber&tag=${hexBlock}&boolean=false&apikey=${apiKey}`);
+        const data2 = await res2.json();
+        const hash = data2.result.hash;
+
+        if (!hash) {
+          resultDiv.innerText = 'Failed to fetch block hash.';
+          return;
+        }
+
+        const seed = parseInt(hash.slice(2, 18), 16);
+        const rng = mulberry32(seed);
+        const numbers = Array.from({length: participants}, (_, i) => i + 1);
+        const winnersList = [];
+
+        for (let i = 0; i < Math.min(winners, participants); i++) {
+          const idx = Math.floor(rng() * numbers.length);
+          winnersList.push(numbers.splice(idx, 1)[0]);
+        }
+
+        resultDiv.innerText = `Block number: ${blockNumber}\nHash: ${hash}\nWinners: ${winnersList.join(', ')}`;
+      } catch (e) {
+        console.error(e);
+        resultDiv.innerText = 'Error occurred. Check your network or API Key.';
+      }
+    }
+
+    function mulberry32(a) {
+      return function() {
+        let t = a += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+  </script>
+</body>
+</html>
